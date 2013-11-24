@@ -86,7 +86,7 @@ class CopyAPI:
         # build tree
         self.tree_children[path] = {}
         for child in response['children']:
-            name = str(os.path.basename(child['path']))
+            name = os.path.basename(child['path']).encode('utf8') 
             ctime = int(child['created_time'])
             if child['modified_time'] == None:
                 mtime = ctime
@@ -380,4 +380,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+	main()
