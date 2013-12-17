@@ -32,6 +32,16 @@ class CopyAPI:
         else:
             self.auth_token = response['auth_token'].encode('ascii','ignore')
 
+    def copygetrequest(self, uri, data, return_json=True):
+        headers = self.headers
+        if self.auth_token != '':
+            headers['X-Authorization'] = self.auth_token
+        response = self.httpconn.request_encode_body("GET", uri, {}, headers, False)
+        if return_json == True:
+            return json.loads(response.data, 'latin-1')
+        else:
+            return response.data
+
     def copyrequest(self, uri, data, return_json=True):
         headers = self.headers
         if self.auth_token != '':
@@ -220,7 +230,16 @@ class CopyFUSE(LoggingMixIn, Operations):
         return 0
 
     def statfs(self, path):
-        return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
+	params = {}
+	response = self.copy_api.copygetrequest('/rest/user', params, True)
+	#print "rest user response=" + ', '.join(response)
+	#print "Storage.used=" + str(response["storage"]["used"])
+	#print "Storage.quota=" + str(response["storage"]["quota"])
+	blocks = response["storage"]["used"]/512
+	bavail = response["storage"]["quota"]/512
+	bfree  = (response["storage"]["quota"]-response["storage"]["used"])/512
+	#f_bsize, f_frsize, f_blocks, f_bfree, f_bavail, f_files, f_ffree, f_favail, f_flag, f_namemax
+        return dict(f_bsize=512, f_frsize=512, f_blocks=bavail, f_bfree=bfree, f_bavail=bfree)
 
     def getattr(self, path, fh=None):
         # print "getattr: " + path
