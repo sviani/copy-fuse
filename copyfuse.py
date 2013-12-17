@@ -253,6 +253,10 @@ class CopyFUSE(LoggingMixIn, Operations):
         if response['result'] != 'success':
             raise FuseOSError(EIO)
 
+	# update tree_children
+ 	name = os.path.basename(path)
+ 	self.copy_api.tree_children[os.path.dirname(path)][name] = {'name': name, 'type': 'dir', 'size': 0, 'ctime': time.time(), 'mtime': time.time()}
+
     def open(self, path, flags):
         # print "open: " + path
         self.file_get(path)
