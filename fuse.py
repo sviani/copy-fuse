@@ -32,7 +32,11 @@ if _system == 'Darwin':
 else:
     _libfuse_path = find_library('fuse')
 if not _libfuse_path:
-    raise EnvironmentError('Unable to find libfuse')
+    if _machine == 'armv5tel':
+        _libfuse_path= '/opt/local/lib/libfuse.so'
+    else:
+        raise EnvironmentError('Unable to find libfuse')
+
 
 if _system == 'Darwin':
     _libiconv = CDLL(find_library('iconv'), RTLD_GLOBAL) # libfuse dependency
@@ -670,7 +674,7 @@ class Operations(object):
 
 class LoggingMixIn:
     logfile = None
-    
+
     def __call__(self, op, path, *args):
         if self.logfile:
             print '->', op, path, repr(args)
