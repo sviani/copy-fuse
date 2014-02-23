@@ -259,6 +259,9 @@ class CopyFUSE(LoggingMixIn, Operations):
 
             st['st_ctime'] = st['st_atime'] = objects[name]['ctime']
             st['st_mtime'] = objects[name]['mtime']
+
+        st['st_uid'] = os.getuid()
+        st['st_gid'] = os.getgid()
         return st
 
     def mkdir(self, path, mode):
