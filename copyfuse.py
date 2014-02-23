@@ -96,7 +96,7 @@ class CopyAPI:
         # build tree
         self.tree_children[path] = {}
         for child in response['children']:
-            name = os.path.basename(child['path']).encode('utf8') 
+            name = os.path.basename(child['path']).encode('utf8')
             ctime = int(child['created_time'])
             if child['modified_time'] == None:
                 mtime = ctime
@@ -230,15 +230,11 @@ class CopyFUSE(LoggingMixIn, Operations):
         return 0
 
     def statfs(self, path):
-	params = {}
-	response = self.copy_api.copygetrequest('/rest/user', params, True)
-	#print "rest user response=" + ', '.join(response)
-	#print "Storage.used=" + str(response["storage"]["used"])
-	#print "Storage.quota=" + str(response["storage"]["quota"])
-	blocks = response["storage"]["used"]/512
-	bavail = response["storage"]["quota"]/512
-	bfree  = (response["storage"]["quota"]-response["storage"]["used"])/512
-	#f_bsize, f_frsize, f_blocks, f_bfree, f_bavail, f_files, f_ffree, f_favail, f_flag, f_namemax
+    	params = {}
+    	response = self.copy_api.copygetrequest('/rest/user', params, True)
+    	blocks = response["storage"]["used"]/512
+    	bavail = response["storage"]["quota"]/512
+    	bfree  = (response["storage"]["quota"]-response["storage"]["used"])/512
         return dict(f_bsize=512, f_frsize=512, f_blocks=bavail, f_bfree=bfree, f_bavail=bfree)
 
     def getattr(self, path, fh=None):
@@ -364,7 +360,7 @@ class CopyFUSE(LoggingMixIn, Operations):
 def main():
     parser = argparse.ArgumentParser(
         description='Fuse filesystem for Copy.com')
-    
+
     parser.add_argument(
         '-d', '--debug', default=False, action='store_true',
         help='turn on debug output (implies -f)')
@@ -376,32 +372,32 @@ def main():
         help='run in foreground')
     parser.add_argument(
         '-o', '--options', help='add extra fuse options (see "man fuse")')
-    
+
     parser.add_argument(
         'username', metavar='EMAIL', help='username/email')
     parser.add_argument(
         'password', metavar='PASS', help='password')
     parser.add_argument(
         'mount_point', metavar='MNTDIR', help='directory to mount filesystem at')
-    
+
     args = parser.parse_args(argv[1:])
-    
+
     username = args.__dict__.pop('username')
     password = args.__dict__.pop('password')
     mount_point = args.__dict__.pop('mount_point')
-    
+
     # parse options
     options_str = args.__dict__.pop('options')
     options = dict([(kv.split('=', 1)+[True])[:2] for kv in (options_str and options_str.split(',')) or []])
-    
+
     fuse_args = args.__dict__.copy()
     fuse_args.update(options)
-    
+
     logfile = None
     if fuse_args.get('debug', False) == True:
         # send to stderr same as where fuse lib sends debug messages
         logfile = stderr
-    
+
     fuse = FUSE(CopyFUSE(username, password, logfile=logfile), mount_point, **fuse_args)
 
 
