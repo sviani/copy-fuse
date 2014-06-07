@@ -2,10 +2,10 @@
 
 from __future__ import with_statement
 
-from errno import EACCES, ENOENT, EIO, EPERM
+from errno import ENOENT, EIO, EPERM
 from threading import Lock
 from stat import S_IFDIR, S_IFREG
-from sys import argv, exit, stderr
+from sys import argv, stderr
 
 import os
 import argparse
@@ -15,7 +15,7 @@ import json
 import hashlib
 import urllib3
 
-from fuse import FUSE, FuseOSError, Operations, LoggingMixIn, fuse_get_context
+from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 
 class CopyAPI:
     headers = {'X-Client-Type': 'api', 'X-Api-Version': '1', "Content-type": "application/x-www-form-urlencoded", "Accept": "text/plain"}
@@ -30,7 +30,7 @@ class CopyAPI:
         if 'auth_token' not in response:
             raise FuseOSError(EPERM)
         else:
-            self.auth_token = response['auth_token'].encode('ascii','ignore')
+            self.auth_token = response['auth_token'].encode('ascii', 'ignore')
 
     def copygetrequest(self, uri, data, return_json=True):
         headers = self.headers
@@ -230,11 +230,11 @@ class CopyFUSE(LoggingMixIn, Operations):
         return 0
 
     def statfs(self, path):
-    	params = {}
-    	response = self.copy_api.copygetrequest('/rest/user', params, True)
-    	blocks = response["storage"]["used"]/512
-    	bavail = response["storage"]["quota"]/512
-    	bfree  = (response["storage"]["quota"]-response["storage"]["used"])/512
+        params = {}
+        response = self.copy_api.copygetrequest('/rest/user', params, True)
+        # blocks = response["storage"]["used"] / 512
+        bavail = response["storage"]["quota"] / 512
+        bfree = (response["storage"]["quota"] - response["storage"]["used"]) / 512
         return dict(f_bsize=512, f_frsize=512, f_blocks=bavail, f_bfree=bfree, f_bavail=bfree)
 
     def getattr(self, path, fh=None):
@@ -271,9 +271,9 @@ class CopyFUSE(LoggingMixIn, Operations):
         if response['result'] != 'success':
             raise FuseOSError(EIO)
 
-	# update tree_children
- 	name = os.path.basename(path)
- 	self.copy_api.tree_children[os.path.dirname(path)][name] = {'name': name, 'type': 'dir', 'size': 0, 'ctime': time.time(), 'mtime': time.time()}
+        # update tree_children
+        name = os.path.basename(path)
+        self.copy_api.tree_children[os.path.dirname(path)][name] = {'name': name, 'type': 'dir', 'size': 0, 'ctime': time.time(), 'mtime': time.time()}
 
     def open(self, path, flags):
         # print "open: " + path
@@ -388,7 +388,7 @@ def main():
 
     # parse options
     options_str = args.__dict__.pop('options')
-    options = dict([(kv.split('=', 1)+[True])[:2] for kv in (options_str and options_str.split(',')) or []])
+    options = dict([(kv.split('=', 1) + [True])[:2] for kv in (options_str and options_str.split(',')) or []])
 
     fuse_args = args.__dict__.copy()
     fuse_args.update(options)
@@ -398,8 +398,7 @@ def main():
         # send to stderr same as where fuse lib sends debug messages
         logfile = stderr
 
-    fuse = FUSE(CopyFUSE(username, password, logfile=logfile), mount_point, **fuse_args)
-
+    FUSE(CopyFUSE(username, password, logfile=logfile), mount_point, **fuse_args)
 
 if __name__ == "__main__":
-	main()
+    main()
