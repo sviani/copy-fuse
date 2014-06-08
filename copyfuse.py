@@ -3,19 +3,19 @@
 from __future__ import with_statement
 
 from errno import ENOENT, EIO, EPERM
-from threading import Lock
 from stat import S_IFDIR, S_IFREG
 from sys import argv, stderr
-
-import os
+from threading import Lock
 import argparse
-import tempfile
-import time
-import json
+import getpass
 import hashlib
+import json
+import os
+import time
 import urllib3
 
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
+
 
 class CopyAPI:
     headers = {'X-Client-Type': 'api', 'X-Api-Version': '1', "Content-type": "application/x-www-form-urlencoded", "Accept": "text/plain"}
@@ -24,7 +24,7 @@ class CopyAPI:
         self.auth_token = ''
         self.tree_children = {}
         self.tree_expire = {}
-        self.httpconn = urllib3.connection_from_url("https://api.copy.com", block=True, maxsize=1)
+        self.httpconn = urllib3.connection_from_url("https://api.copy.com", block=True, maxsize=1, timeout=30)
         data = {'username': username, 'password' : password}
         response = self.copyrequest('/auth_user', data)
         if 'auth_token' not in response:
@@ -73,12 +73,42 @@ class CopyAPI:
 
         # print headers
 
-        if method == 'has_parts':
+        if method != 'send_parts':
             response = self.httpconn.request_encode_body("POST", "/" + method, {'data': json.dumps(data)}, headers, False)
         else:
             response = self.httpconn.urlopen("POST", "/" + method, payload, headers)
 
+        if method == 'get_parts':
+            return response.data
         return json.loads(response.data, 'latin-1')
+
+    def find_part(self, f, offset):
+        if f['curr_part'] and int(f['curr_part']['offset']) == offset:
+            return f['curr_part']
+        part_found = None
+        parts = f['object']['object']['revisions'][0]['parts']
+        for part in parts:
+            lower = int(part['offset'])
+            upper = lower + int(part['size'])
+            if lower <= offset and offset < upper:
+                part_found = part
+                break
+        return part_found
+
+    def cache_part_data(self, f, part):
+        if part != f['curr_part']:
+            f['curr_part_data'] = self.part_request("get_parts", [part], None)
+            f['curr_part'] = part
+        return f['curr_part_data']
+
+    def get_part_data(self, part, data, offset, size):
+        lower = offset - int(part['offset'])
+        upper = lower + size
+        if upper > int(part['size']):
+            upper = int(part['size'])
+        if lower >= upper:
+            return None
+        return data[lower:upper]
 
     def list_objects(self, path, ttl=10):
         # check cache
@@ -140,88 +170,23 @@ class CopyFUSE(LoggingMixIn, Operations):
             self.files[new] = self.files[old]
             del self.files[old]
 
-    def file_get(self, path, download=True):
+    def file_get(self, path):
         if path in self.files:
             return self.files[path]
-
-        if download == True:
-            raw = self.copy_api.copyrequest("/download_object", {'path': path}, False)
-        else:
-            raw = ''
-
-        f = tempfile.NamedTemporaryFile(delete=False)
-        f.write(raw)
-        self.files[path] = {'object': f, 'modified': False}
-
-        # print "opening: " + path
-
+        data = {'path': path, 'max_items': 1, 'include_parts': 1}
+        obj = self.copy_api.copyrequest('/list_objects', data)
+        self.files[path] = {'object': obj, 'modified': False, 'curr_part': None, 'curr_part_data': None}
         return self.files[path]
 
     def file_close(self, path):
         if path in self.files:
             if self.files[path]['modified'] == True:
                 self.file_upload(path)
-
-            # print "closing: " + path
-
-            self.files[path]['object'].close()
             del self.files[path]
 
     def file_upload(self, path):
-        if path not in self.files:
-            raise FuseOSError(EIO)
-
-        fileObject = self.file_get(path)
-        if fileObject['modified'] == False:
-            return True
-
-        # print 'uploading: ' + path
-
-        f = fileObject['object']
-
-        # obtain the size of the file
-        f.seek(0, os.SEEK_END)
-        size = f.tell()
-        f.seek(0)
-
-        parts = self.copy_api.partify(f, size)
-
-        # obtain list of parts that need to be sent
-        response = self.copy_api.part_request('has_parts', parts)
-
-        if 'send_parts' not in response:
-            raise FuseOSError(EIO)
-
-        # build array of parts that need to be sent
-        need_parts = {}
-        for need_part in response['send_parts']:
-            need_parts[need_part['fingerprint'] + '-' + need_part['size']] = True
-
-        # send the missing parts
-        send_parts = {}
-        for i in range(0, len(parts)):
-            if parts[i]['fingerprint'] + '-' + str(parts[i]['size']) in need_parts:
-                send_parts[len(send_parts)] = parts[i]
-        response = self.copy_api.part_request('send_parts', send_parts)
-
-        # trap any errors
-        if (response == False or response['result'] != 'success'):
-            raise FuseOSError(EIO)
-
-        # remove data from parts (already sent)
-        for i in range(0, len(parts)):
-            del parts[i]['data']
-
-        # send file metadata
-        params = {'meta': {}}
-        params['meta'][0] = {'action': 'create', 'object_type': 'file', 'path': path, 'size': size, 'parts': parts}
-        response = self.copy_api.copyrequest('/update_objects', params, True)
-
-        # trap any errors
-        if response['result'] != 'success':
-            raise FuseOSError(EIO)
-
-        fileObject['modified'] = False
+        # TODO
+        pass
 
     def chmod(self, path, mode):
         return 0
@@ -297,9 +262,22 @@ class CopyFUSE(LoggingMixIn, Operations):
         self.file_close(path)
 
     def read(self, path, size, offset, fh):
-        f = self.file_get(path)['object']
-        f.seek(offset)
-        return f.read(size)
+        buf = ""
+        f = self.file_get(path)
+        while size > 0:
+            # print "*** offset = " + repr(offset) + " size = " + repr(size) + " len(buf) = " + repr(len(buf))
+            part = self.copy_api.find_part(f, offset)
+            # print "*** part = " + repr(part)
+            if part == None:
+                break
+            data = self.copy_api.cache_part_data(f, part)
+            chunk = self.copy_api.get_part_data(part, data, offset, size)
+            if chunk == None:
+                break
+            buf += chunk
+            offset += len(chunk)
+            size -= len(chunk)
+        return buf
 
     def readdir(self, path, fh):
         # print "readdir: " + path
@@ -322,7 +300,7 @@ class CopyFUSE(LoggingMixIn, Operations):
         name = os.path.basename(path)
         if os.path.dirname(path) in self.copy_api.tree_children:
             self.copy_api.tree_children[os.path.dirname(path)][name] = {'name': name, 'type': 'file', 'size': 0, 'ctime': time.time(), 'mtime': time.time()}
-        self.file_get(path, download=False)
+        self.file_get(path)
         self.file_upload(path)
         return 0
 
@@ -344,9 +322,7 @@ class CopyFUSE(LoggingMixIn, Operations):
 
     def write(self, path, data, offset, fh):
         fileObject = self.file_get(path)
-        f = fileObject['object']
-        f.seek(offset)
-        f.write(data)
+        # TODO
         fileObject['modified'] = True
         return len(data)
 
@@ -398,6 +374,8 @@ def main():
         # send to stderr same as where fuse lib sends debug messages
         logfile = stderr
 
+    if len(password) <= 0:
+        password = getpass.getpass()
     FUSE(CopyFUSE(username, password, logfile=logfile), mount_point, **fuse_args)
 
 if __name__ == "__main__":
